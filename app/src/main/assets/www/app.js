@@ -93,7 +93,7 @@
     folder: '<path d="M3 7a1.5 1.5 0 0 1 1.5-1.5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/>',
     list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
     shield: '<path d="M12 3l7.5 3v6c0 4.8-3.3 8.2-7.5 9.3C7.8 20.2 4.5 16.8 4.5 12V6z"/><path d="M12 7.5v9M8 11h8"/>',
-    sword: '<path d="M20 4l-9.5 9.5M20 4h-4.5M20 4v4.5"/><path d="M6.5 12l5.5 5.5M9 15l-4.5 4.5"/>',
+    sword: '<path d="M20.5 3.5l-.6 3.6-9.1 9.1-3-3 9.1-9.1z"/><path d="M5.6 12.6l5.8 5.8M8.6 15.4l-4 4"/><circle cx="4" cy="20" r="1"/>',
     castle: '<path d="M3.5 20.5V8h2.5v2.5h2.5V8H11v2.5h2V8h2.5v2.5H18V8h2.5v12.5z"/><path d="M10 20.5v-4a2 2 0 0 1 4 0v4"/>',
     book: '<path d="M3 5h5.5A3.5 3.5 0 0 1 12 8.5V20a2.5 2.5 0 0 0-2.5-2.5H3z"/><path d="M21 5h-5.5A3.5 3.5 0 0 0 12 8.5V20a2.5 2.5 0 0 1 2.5-2.5H21z"/>',
     flag: '<path d="M5.5 21V4"/><path d="M5.5 4.5h12l-2.5 4 2.5 4h-12"/>',
@@ -226,7 +226,7 @@
   const OTHER_GAME = /Age of Empires (III|IV|Online|Mobile)|Age of Mythology|Castle Siege|World Domination|Age of Empires: Definitive|^Age of Empires$/i;
   const SECTIONS = [
     { key: 'civilizations', label: 'Civilizations', icon: 'shield', re: /civili[sz]ation/i },
-    { key: 'units', label: 'Units', icon: 'sword', re: /\bunits?\b|infantry|cavalry|archers?\b|siege|ships?\b|naval|monks?\b|villagers?/i },
+    { key: 'units', label: 'Units', icon: 'sword', re: /\bunits?\b|infantry|cavalry|archers?\b|siege|ships?\b|naval|monks?\b|villagers?|animals?\b|fauna|wildlife/i },
     { key: 'buildings', label: 'Buildings', icon: 'castle', re: /buildings?|wonders?\b|structures?|fortifications?|walls?\b|towers?\b/i },
     { key: 'technologies', label: 'Technologies', icon: 'book', re: /technolog|upgrades?\b|research/i },
     { key: 'campaigns', label: 'Campaigns', icon: 'flag', re: /campaigns?|scenarios?|historical battles?|missions?|chronicles/i },
@@ -236,6 +236,30 @@
   const isAoe2Cat = n => n.startsWith(PREFIX) && (n.length === PREFIX.length || /^[\s:(,–—-]/.test(n.slice(PREFIX.length)));
   const catRest = n => (isAoe2Cat(n) ? n.slice(PREFIX.length).replace(/^[\s:–—-]+/, '').trim() : n);
   const catLabel = n => cap(catRest(n)) || n;
+
+  // A category belongs to the section of its head noun, i.e. the LAST keyword in its name:
+  // "map editor units" → Units, "unit upgrades" → Technologies, "campaign heroes" → Heroes.
+  function classifyCat(name) {
+    const rest = ' ' + catRest(name).toLowerCase() + ' ';
+    let best = null, bestEnd = -1;
+    for (const s of SECTIONS) {
+      const re = new RegExp(s.re.source, 'gi');
+      let m;
+      while ((m = re.exec(rest))) {
+        const end = m.index + m[0].length;
+        if (end > bestEnd) { bestEnd = end; best = s.key; }
+        if (!m[0].length) re.lastIndex++;
+      }
+    }
+    return best;
+  }
+  // Each article is listed in one section only: the most specific one among all its categories
+  // (a hero is listed under Heroes, not Units; a unit that also sits in a map category stays in Units).
+  const PRIORITY = ['civilizations', 'heroes', 'units', 'buildings', 'technologies', 'campaigns', 'maps'];
+  function primarySection(catNames) {
+    const ks = new Set(catNames.map(classifyCat).filter(Boolean));
+    return PRIORITY.find(k => ks.has(k)) || null;
+  }
 
   async function loadCategories(force = false) {
     const cached = await meta.get('cats').catch(() => null);
@@ -280,21 +304,23 @@
   const sortItems = items => items.sort((a, b) => shortName(a.t).localeCompare(shortName(b.t), 'en', { sensitivity: 'base' }));
 
   function deriveSection(cat, sec) {
-    const idx = cat.cats.map((n, i) => (sec.re.test(catRest(n)) ? i : -1)).filter(i => i >= 0);
+    const kinds = cat.cats.map(classifyCat);
+    const idx = kinds.map((k, i) => (k === sec.key ? i : -1)).filter(i => i >= 0);
     const remap = new Map(idx.map((ci, j) => [ci, j]));
-    const items = cat.items.filter(it => it.c.some(c => remap.has(c)))
+    const items = cat.items
+      .filter(it => PRIORITY.find(k => it.c.some(c => kinds[c] === k)) === sec.key)
       .map(it => ({ t: it.t, th: it.th, c: it.c.filter(c => remap.has(c)).map(c => remap.get(c)) }));
     return { at: cat.at, cats: idx.map(i => cat.cats[i]), items: sortItems(items) };
   }
 
   async function sectionData(key, force = false) {
     const sec = SECTIONS.find(s => s.key === key);
-    const mk = 'sec:' + key;
+    const mk = 'sec2:' + key;
     const stale = await meta.get(mk).catch(() => null);
     if (stale && !force && (Date.now() - stale.at < 7 * DAY || !online())) return stale;
     try {
       if (!online()) throw new NetError('offline');
-      const cats = (await loadCategories()).filter(c => sec.re.test(catRest(c.name)));
+      const cats = (await loadCategories()).filter(c => classifyCat(c.name) === key);
       const items = new Map();
       let errors = 0;
       await pool(cats, 4, async (c, i) => {
@@ -309,6 +335,18 @@
         } catch (e) { errors++; }
       });
       if (!items.size && errors) throw new NetError('Could not load the list');
+      // Drop articles whose main section is a different one.
+      const keys = [...items.keys()];
+      const batches = [];
+      for (let i = 0; i < keys.length; i += 50) batches.push(keys.slice(i, i + 50));
+      await pool(batches, 2, async batch => {
+        try {
+          for (const [k, cs] of await pageCategories(batch)) {
+            const p = primarySection(cs.map(c => c.replace(/^[^:]+:/, '')).filter(isAoe2Cat));
+            if (p && p !== key) items.delete(k);
+          }
+        } catch (e) { /* keep the unfiltered batch */ }
+      });
       const data = { at: Date.now(), cats: cats.map(c => c.name), items: sortItems([...items.values()]) };
       await meta.set(mk, data).catch(() => {});
       return data;
@@ -370,6 +408,9 @@
     if (!s || s.startsWith('data:')) return '';
     return canon(s);
   }
+  // Small icons are served at their CSS size; ask for 2x so they stay crisp on phone screens.
+  // Applied both when rendering and when prefetching, so offline copies match.
+  const sharpen = u => String(u).replace(/\/scale-to-width-down\/(\d+)(?=[/?]|$)/, (m, n) => (+n <= 120 ? `/scale-to-width-down/${n * 2}` : m));
   function extractImages(html) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const out = new Set();
@@ -393,6 +434,119 @@
     Stats.bytes += size - (old ? old.b || 0 : 0);
     return im;
   }
+
+  // ------------------------------------------------------------------ list icons (civilization emblems, unit icons…)
+  // For each article we look at the files used on its page and pick the one that is clearly
+  // "its" icon: the file name contains the article's name plus "icon"/"emblem"/"crest"… — e.g.
+  // a civilization's emblem or a unit's in-game icon. Results are cached; '' means "none found".
+  const Icons = { map: new Map(), dirty: false, timer: 0 };
+  const ICON_KEY = /civicon|emblem|crest|coatofarms|insignia|heraldr|symbol|banner|flag|shield/;
+  const ICON_BAD = /^ui|wonder|uniquetech|techtree|menu|screenshot|concept|portrait|aoe3|aoe4|aoeo|aom|campaign|cutscene|loading|music|theme|render|ingame|sprite|animation|artwork/;
+  function nameVariants(t) {
+    const n = shortName(t).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const v = new Set([n]);
+    if (n.endsWith('es')) v.add(n.slice(0, -2));
+    if (n.endsWith('s')) v.add(n.slice(0, -1));
+    return [...v].filter(x => x.length >= 3);
+  }
+  function iconScore(file, title) {
+    const fn = file.replace(/^[^:]+:/, '').replace(/\.[a-z0-9]+$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const v = nameVariants(title).find(x => fn.includes(x));
+    if (!v) return 0;
+    let s = 10;
+    // Other words besides the name (e.g. "CastleAgeIcon" for "Castle") mean it is another thing's icon.
+    const rest = fn.replace(v, '').replace(/civicon|icon|emblem|crest|coatofarms|insignia|symbol|banner|flag|shield|aoe2de|aoe2|aoeii|definitive|edition|de|ii|hd|new|small|large|\d+/g, '');
+    if (rest.length >= 3) s -= 5;
+    if (ICON_KEY.test(fn)) s += 8;
+    if (fn.includes('icon')) s += 4;
+    if (/de$|aoe2|definitive/.test(fn)) s += 1;
+    if (ICON_BAD.test(fn)) s -= 8;
+    return s - fn.length / 100;
+  }
+  function saveIconsSoon() {
+    Icons.dirty = true;
+    if (Icons.timer) return;
+    Icons.timer = setTimeout(() => {
+      Icons.timer = 0;
+      Icons.dirty = false;
+      meta.set('icons', { at: Date.now(), entries: [...Icons.map] }).catch(() => {});
+    }, 800);
+  }
+  async function loadIcons() {
+    try {
+      const v = await meta.get('icons');
+      if (v && Date.now() - v.at < 45 * DAY) Icons.map = new Map(v.entries);
+    } catch (e) { /* none yet */ }
+  }
+  // Runs a per-page list property (images, categories…) for up to 50 titles, following continuation.
+  // Returns Map(normalized requested title → list of titles).
+  async function propLists(titles, params, field) {
+    const out = new Map();
+    const redirectTo = new Map();
+    let cont = {};
+    for (let i = 0; i < 40; i++) {
+      const j = await api({ action: 'query', titles: titles.join('|'), redirects: '1', ...params, ...cont });
+      const q = j.query || {};
+      for (const r of q.redirects || []) redirectTo.set(normTitle(r.from), normTitle(r.to));
+      for (const p of q.pages || []) {
+        if (!p[field]) continue;
+        const k = normTitle(p.title);
+        const arr = out.get(k) || [];
+        arr.push(...p[field].map(x => x.title));
+        out.set(k, arr);
+      }
+      if (!j.continue) break;
+      cont = j.continue;
+    }
+    const res = new Map();
+    for (const t of titles) { const k = normTitle(t); res.set(k, out.get(redirectTo.get(k) || k) || []); }
+    return res;
+  }
+  const filesUsedOn = titles => propLists(titles, { prop: 'images', imlimit: 'max' }, 'images');
+  const pageCategories = titles => propLists(titles, { prop: 'categories', cllimit: 'max', clshow: '!hidden' }, 'categories');
+  async function imageUrls(files) {
+    const res = new Map();
+    for (let i = 0; i < files.length; i += 50) {
+      const j = await api({ action: 'query', prop: 'imageinfo', iiprop: 'url', iiurlwidth: '120', titles: files.slice(i, i + 50).join('|') });
+      for (const p of (j.query && j.query.pages) || []) {
+        const ii = p.imageinfo && p.imageinfo[0];
+        if (ii && (ii.thumburl || ii.url)) res.set(normTitle(p.title), canon(ii.thumburl || ii.url));
+      }
+    }
+    return res;
+  }
+  /** Finds icons for titles not checked yet. Returns how many new icons were found. */
+  async function discoverIcons(titles, { progress, stop } = {}) {
+    const todo = [...new Set(titles.map(normTitle))].filter(k => k && !Icons.map.has(k));
+    if (!todo.length || !online()) return 0;
+    let found = 0, doneN = 0;
+    const batches = [];
+    for (let i = 0; i < todo.length; i += 50) batches.push(todo.slice(i, i + 50));
+    await pool(batches, 2, async batch => {
+      try {
+        const used = await filesUsedOn(batch);
+        const pick = new Map();
+        for (const k of batch) {
+          let best = null, bestS = 12.5; // needs the name plus "icon" or an emblem word
+          for (const f of used.get(k) || []) { const s = iconScore(f, k); if (s > bestS) { bestS = s; best = f; } }
+          if (best) pick.set(k, normTitle(best));
+        }
+        const urls = pick.size ? await imageUrls([...new Set(pick.values())]) : new Map();
+        for (const k of batch) {
+          const u = pick.has(k) ? urls.get(pick.get(k)) || '' : '';
+          Icons.map.set(k, u);
+          if (u) found++;
+        }
+        saveIconsSoon();
+      } catch (e) {
+        if (!online()) throw e;
+      }
+      doneN += batch.length;
+      if (progress) progress(doneN, todo.length);
+    }, stop);
+    return found;
+  }
+  const iconFor = it => Icons.map.get(normTitle(it.t)) || it.th || '';
 
   async function loadStored(title) {
     const k = normTitle(title);
@@ -540,7 +694,7 @@
     }
     for (const img of root.querySelectorAll('img')) {
       const u = imgSrc(img);
-      if (u) img.setAttribute('src', u);
+      if (u) img.setAttribute('src', sharpen(u));
       for (const a of ['data-src', 'srcset', 'data-srcset', 'sizes']) img.removeAttribute(a);
       img.classList.remove('lazyload', 'lazyloaded');
       img.setAttribute('loading', 'lazy');
@@ -659,7 +813,8 @@
   function rowHtml(it, { subHtml = '' } = {}) {
     const name = shortName(it.d || it.t);
     const letter = (name.replace(/^[^\p{L}\p{N}]+/u, '').charAt(0) || '•').toUpperCase();
-    const th = it.th ? `<img class="ti" src="${esc(it.th)}" alt="" loading="lazy">` : `<span class="ti ph">${esc(letter)}</span>`;
+    const src = iconFor(it);
+    const th = src ? `<img class="ti" src="${esc(src)}" alt="" loading="lazy" data-l="${esc(letter)}">` : `<span class="ti ph">${esc(letter)}</span>`;
     const saved = savedKeys.has(normTitle(it.t)) ? `<span class="sv" aria-label="Saved offline">${icon('check')}</span>` : '';
     return `<li><a class="row" href="#/wiki/${encT(it.t)}">${th}<span class="row-t">${esc(name)}${subHtml ? `<small>${subHtml}</small>` : ''}</span>${saved}</a></li>`;
   }
@@ -842,7 +997,7 @@
     setBar({ home: true, actions: [themeBtn(), iconBtn('settings', 'Settings', () => go('#/settings'))] });
     const counts = {};
     for (const s of SECTIONS) {
-      const d = await meta.get('sec:' + s.key).catch(() => null);
+      const d = await meta.get('sec2:' + s.key).catch(() => null);
       if (d) counts[s.key] = d.items.length;
     }
     if (token !== navToken) return;
@@ -922,6 +1077,15 @@
       draw();
     }));
     draw();
+    return draw;
+  }
+
+  // Looks up emblems/icons for a list in the background, then redraws it.
+  function enhanceIcons(items, redraw, token) {
+    discoverIcons(items.map(i => i.t)).then(n => {
+      if (n && token === navToken) { const y = scrollY; redraw(); scrollTo(0, y); }
+      if (n && S.images) call('prefetch', JSON.stringify(items.map(iconFor).filter(Boolean)));
+    }).catch(() => {});
   }
 
   async function viewSection(key, token) {
@@ -932,8 +1096,9 @@
     let data;
     try { data = await sectionData(key); } catch (e) { if (token === navToken) showError(e, () => dispatch()); return; }
     if (token !== navToken) return;
-    renderList(data, { chips: data.cats.map(catLabel), placeholder: `Filter ${sec.label.toLowerCase()}…` });
+    const redraw = renderList(data, { chips: data.cats.map(catLabel), placeholder: `Filter ${sec.label.toLowerCase()}…` });
     finishView(token);
+    enhanceIcons(data.items, redraw, token);
   }
 
   async function viewCategory(name, token) {
@@ -942,8 +1107,9 @@
     let data;
     try { data = await categoryData(name); } catch (e) { if (token === navToken) showError(e, () => dispatch()); return; }
     if (token !== navToken) return;
-    renderList(data, { subs: data.subs || [], placeholder: 'Filter articles…' });
+    const redraw = renderList(data, { subs: data.subs || [], placeholder: 'Filter articles…' });
     finishView(token);
+    enhanceIcons(data.items, redraw, token);
   }
 
   async function viewCategories(token) {
@@ -1130,7 +1296,8 @@
     const art = document.createElement('article');
     art.className = 'article';
     const saved = savedKeys.has(normTitle(rec.title)) || rec.stored;
-    art.innerHTML = `<h1 class="art-title">${esc(display)}</h1><div class="art-meta">${saved ? `<span class="badge ok">${icon('check')}Saved offline</span>` : ''}</div>`;
+    const ic = Icons.map.get(normTitle(rec.title));
+    art.innerHTML = `<div class="art-head">${ic ? `<img class="art-ic" src="${esc(ic)}" alt="">` : ''}<h1 class="art-title">${esc(display)}</h1></div><div class="art-meta">${saved ? `<span class="badge ok">${icon('check')}Saved offline</span>` : ''}</div>`;
     const body = document.createElement('div');
     body.className = 'wiki';
     body.append(...wr.childNodes);
@@ -1190,7 +1357,7 @@
           try {
             const p = await fetchPage(it.t);
             const im = await savePage(p);
-            if (S.images && im.length) call('prefetch', JSON.stringify(im));
+            if (S.images && im.length) call('prefetch', JSON.stringify(im.map(sharpen)));
             this.done++;
           } catch (e) {
             if (isNetErr(e) && !online()) { this.paused = true; this.error = 'Connection lost. Tap Resume when you are back online.'; }
@@ -1198,6 +1365,14 @@
           }
           this.emitSoon();
         }, () => this.paused);
+        if (!this.paused) {
+          this.current = '';
+          await discoverIcons(cat.items.map(i => i.t), {
+            progress: (i, n) => { this.phase = `Finding emblems & icons (${i}/${n})`; this.emitSoon(); },
+            stop: () => this.paused,
+          }).catch(() => {});
+          if (S.images) call('prefetch', JSON.stringify(cat.items.map(iconFor).filter(Boolean)));
+        }
         this.phase = this.paused ? 'Paused' : todo.length ? 'Complete' : 'Up to date';
         await meta.set('offline', { at: Date.now(), done: Stats.pages, total: this.total, failed: this.failed, complete: !this.paused }).catch(() => {});
       } catch (e) {
@@ -1256,9 +1431,10 @@
     let all = [];
     try { all = await dbAll('idx'); } catch (e) { return; }
     const urls = [];
-    for (const x of all) if (x.im) urls.push(...x.im);
+    for (const x of all) if (x.im) urls.push(...x.im.map(sharpen));
     const cat = await Catalog.get();
     if (cat) for (const it of cat.items) if (it.th) urls.push(it.th);
+    for (const u of Icons.map.values()) if (u) urls.push(u);
     for (let i = 0; i < urls.length; i += 400) {
       call('prefetch', JSON.stringify(urls.slice(i, i + 400)));
       await sleep(0);
@@ -1398,8 +1574,21 @@
     window.addEventListener('scroll', () => bar.classList.toggle('scrolled', scrollY > 4), { passive: true });
     view.addEventListener('click', onViewClick);
     overlay.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeOverlay(); });
+    // Broken or not-yet-saved images (e.g. offline): letter placeholder in lists, hidden in articles.
+    document.addEventListener('error', e => {
+      const el = e.target;
+      if (!(el instanceof HTMLImageElement)) return;
+      if (el.classList.contains('ti')) {
+        const s = document.createElement('span');
+        s.className = 'ti ph';
+        s.textContent = el.dataset.l || '•';
+        el.replaceWith(s);
+      } else if (el.closest('.wiki')) {
+        el.classList.add('broken');
+      }
+    }, true);
     try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) { /* optional */ }
-    await Promise.race([loadStats(), sleep(1500)]);
+    await Promise.race([Promise.all([loadStats(), loadIcons()]), sleep(1500)]);
     route();
   }
   init();

@@ -282,7 +282,9 @@ main { max-width: 860px; margin: 0 auto; padding: 0 16px 48px; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 /* ---------- article */
-.art-title { margin: 12px 0 4px; font: 700 1.75rem/1.2 var(--serif); overflow-wrap: anywhere; }
+.art-head { display: flex; align-items: center; gap: 14px; margin: 12px 0 4px; }
+.art-ic { width: 52px; height: 52px; flex: none; object-fit: contain; }
+.art-title { margin: 0; font: 700 1.75rem/1.2 var(--serif); overflow-wrap: anywhere; }
 .art-meta { display: flex; flex-wrap: wrap; gap: 8px; min-height: 8px; margin-bottom: 14px; }
 .badge {
   display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 12px;
@@ -310,6 +312,7 @@ main { max-width: 860px; margin: 0 auto; padding: 0 16px 48px; }
 .wiki dt { font-weight: 700; }
 .wiki dd { margin: 0 0 6px 1.2em; }
 .wiki img { max-width: 100%; height: auto; vertical-align: middle; }
+.wiki img.broken { display: none; }
 .wiki hr { border: 0; border-top: 1px solid var(--line); }
 .wiki blockquote {
   margin: 0 0 14px; padding: 10px 14px; border-left: 3px solid var(--accent);
