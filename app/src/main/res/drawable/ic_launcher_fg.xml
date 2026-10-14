@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground: an original castle-tower mark (108 x 108, safe zone 66). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateY="-4">
+        <path
+            android:fillColor="@color/icon_fg"
+            android:fillType="evenOdd"
+            android:pathData="M36,34 h6 v5 h4 v-5 h6 v5 h4 v-5 h6 v5 h4 v-5 h6 v14 h-3 v34 h-30 v-34 h-3 z M49,82 v-9 a5,5 0 0 1 10,0 v9 z M52.5,55 h3 v9 h-3 z" />
+    </group>
+</vector>

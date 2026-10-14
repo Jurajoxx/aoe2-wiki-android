@@ -1,0 +1,62 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease 2>&1 | tee build.log
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk AoE2-Wiki.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: AoE II Wiki 1.0.${{ github.run_number }}
+          files: AoE2-Wiki.apk
+          make_latest: true
+          body: |
+            Download **AoE2-Wiki.apk** below on your Android phone and open it to install (or update) the app.
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AoE2-Wiki-apk
+          path: AoE2-Wiki.apk
+
+      # Makes the build log readable from the ci-log branch when something goes wrong.
+      - name: Publish build log on failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/log
+          cp build.log /tmp/log/build.log 2>/dev/null || echo "no build log" > /tmp/log/build.log
+          cd /tmp/log
+          git init -q -b ci-log
+          git add build.log
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "Build log for run ${{ github.run_number }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-log
